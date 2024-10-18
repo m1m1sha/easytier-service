@@ -1,0 +1,27 @@
+[package]
+name = "easytier-service"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.77"
+
+[dependencies]
+salvo = "0.73"
+tokio = { version = "1", features = ["macros"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+reqwest = { version = "0.12", features = ["json"] }
+anyhow = "1"
+zip = "2"
+fastrand = "2"
+git-version = "0.3"
+clap = { version = "4", features = [
+  "string",
+  "unicode",
+  "derive",
+  "wrap_help",
+] }
+
+[target."cfg(windows)".dependencies]
+encoding = "0.2"
