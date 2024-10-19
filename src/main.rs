@@ -3,6 +3,7 @@ use salvo::prelude::*;
 
 mod constant;
 mod easytier;
+mod error;
 mod handler;
 mod http;
 mod model;
@@ -20,6 +21,7 @@ struct Cli {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt().init();
+    easytier::check_exists(false).await.unwrap();
 
     let cli = Cli::parse();
 

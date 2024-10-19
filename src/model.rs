@@ -51,6 +51,12 @@ pub struct RInfo {
 
 #[derive(Clone, Default, Debug, Deserialize, Serialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
+pub struct RRepair {
+    pub version: EVersion,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, Serialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
 pub struct Resp<T> {
     pub code: Option<i64>,
     pub msg: Option<String>,

@@ -6,40 +6,46 @@ use std::{
 
 use anyhow::Result;
 
-use crate::{model::*, utils};
-pub async fn github_releases(org: &str, repo: &str) -> Result<Vec<GRelease>> {
+use crate::{
+    model::*,
+    utils::{self, EFile},
+};
+pub async fn easytier_releases(filter_platform: bool) -> Result<Vec<GRelease>> {
     let resp = reqwest::Client::new()
-        .get(format!(
-            "https://api.github.com/repos/{}/{}/releases",
-            org, repo
-        ))
-        .header("User-Agent", "Easytier-service")
+        .get("https://api.github.com/repos/easytier/easytier/releases")
+        .header("User-Agent", "EasytierService")
         .send()
         .await?;
-
-    Ok(resp.json::<Vec<GRelease>>().await?)
+    let releases: Vec<GRelease> = resp.json().await?;
+    Ok(if filter_platform {
+        releases
+            .into_iter()
+            .map(|r| {
+                let mut r = r.clone();
+                r.assets = utils::filter_release_with_platform(r.assets);
+                r
+            })
+            .collect()
+    } else {
+        releases
+    })
 }
 
-pub async fn download_file(url: &str, file_path: &str) -> Result<()> {
+pub async fn download_file(url: &str, file_path: &str, need_file: Vec<EFile>) -> Result<()> {
     let target = format!("https://ghp.ci/{}", url);
-    let response = reqwest::get(target)
-        .await
-        .expect("error to download easytier url");
+    let response = reqwest::get(target).await?;
     let path = path::Path::new(&file_path);
 
-    let mut file = match File::create(&path) {
-        Err(why) => panic!("couldn't create {}", why),
-        Ok(file) => file,
-    };
+    let mut file = File::create(&path)?;
 
-    let content = response.bytes().await.expect("error to bytes easytier");
-    println!("下载完成，开始写入");
-    file.write_all(&content).expect("error to write easytier");
-    println!("写入完成");
-    utils::unzip(path)?;
+    let content = response.bytes().await?;
+
+    file.write_all(&content)?;
+    utils::unzip(path, need_file)?;
+
     match fs::remove_file(path) {
-        Ok(_) => println!("删除zip文件成功"),
-        Err(_) => println!("删除zip文件失败"),
+        Ok(_) => tracing::info!("delete zip file success"),
+        Err(e) => tracing::warn!("delete zip file error: {}", e),
     }
 
     Ok(())

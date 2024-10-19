@@ -4,10 +4,88 @@ use anyhow::Result;
 
 use crate::model::*;
 
-pub fn unzip<P>(fname: P) -> Result<()>
+#[derive(Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum EFile {
+    #[default]
+    All = 0x0,
+    Core = 0x1,
+    Cli = 0x2,
+    #[cfg(windows)]
+    Packet = 0x3,
+    #[cfg(windows)]
+    Wintun = 0x4,
+    Other = 0x20,
+}
+
+impl EFile {
+    pub fn to_u64(list: Vec<Self>) -> u64 {
+        use std::collections::BTreeSet;
+        let unique: BTreeSet<_> = list.iter().collect();
+        let unique_vec: Vec<_> = unique.into_iter().cloned().collect();
+        let mut result = 0u64;
+
+        if !unique_vec.contains(&EFile::All) {
+            for item in unique_vec {
+                result |= 1 << item as u64;
+            }
+        }
+
+        result
+    }
+
+    pub fn from_u64(value: u64) -> Vec<Self> {
+        let mut result = Vec::new();
+
+        for i in 0..64 {
+            if (value & (1 << i)) != 0 {
+                result.push(Self::from_u8(i as u8));
+            } else if i == 0 && value == 0 {
+                result.push(EFile::All);
+            }
+        }
+
+        result
+    }
+
+    fn from_u8(value: u8) -> Self {
+        match value {
+            0x0 => EFile::All,
+            0x1 => EFile::Core,
+            0x2 => EFile::Cli,
+            #[cfg(windows)]
+            0x3 => EFile::Packet,
+            #[cfg(windows)]
+            0x4 => EFile::Wintun,
+            _ => EFile::Other,
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        let value = value.to_lowercase().replace(".exe", "").replace(".dll", "");
+
+        if value == String::from("easytier-core") {
+            EFile::Core
+        } else if value == String::from("easytier-cli") {
+            EFile::Cli
+        } else if cfg!(target_os = "windows") && value == String::from("packet") {
+            EFile::Packet
+        } else if cfg!(target_os = "windows") && value == String::from("wintun") {
+            EFile::Wintun
+        } else {
+            EFile::Other
+        }
+    }
+}
+
+pub fn unzip<P>(fname: P, need_file: Vec<EFile>) -> Result<()>
 where
     P: AsRef<std::path::Path>,
 {
+    let need_file = if need_file.len() == 0 {
+        vec![EFile::All]
+    } else {
+        need_file
+    };
     let file = std::fs::File::open(fname)?;
     let mut archive = zip::ZipArchive::new(file)?;
 
@@ -18,6 +96,17 @@ where
             Some(path) => path.to_owned(),
             None => continue,
         };
+
+        if let Some(file_name) = out_path.file_name() {
+            let file_name_str = utf8_or_gbk_to_string(file_name.as_encoded_bytes());
+            if !need_file.contains(&EFile::from_str(&file_name_str))
+                && !need_file.contains(&EFile::All)
+            {
+                continue;
+            }
+            tracing::info!("extracting {:?}", file_name_str);
+        }
+
         // 创建输出文件的父目录
         if let Some(parent) = out_path.parent() {
             if !parent.exists() {
