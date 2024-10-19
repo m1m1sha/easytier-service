@@ -2,6 +2,8 @@ use salvo::prelude::*;
 
 use crate::{constant, easytier, model::*};
 
+pub mod auth_token;
+
 #[handler]
 pub async fn info(res: &mut Response) {
     let mut easytier_list = vec![];
@@ -32,8 +34,8 @@ pub async fn info(res: &mut Response) {
 
 #[handler]
 pub async fn repair(req: &mut Request, res: &mut Response) {
-    let replace = req.query::<bool>("replace").unwrap_or_default();
-    match easytier::check_exists(replace).await {
+    let force = req.query::<bool>("force").unwrap_or_default();
+    match easytier::check_exists(force).await {
         Ok(_) => {
             tracing::info!("repair easytier success");
 

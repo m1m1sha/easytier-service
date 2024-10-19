@@ -1,8 +1,15 @@
-use std::{iter::repeat_with, path::Path};
+use std::{collections::BTreeSet, iter::repeat_with, path::Path};
 
 use anyhow::Result;
+use tokio::{
+    fs::OpenOptions,
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+};
 
-use crate::model::*;
+use crate::{
+    constant::{self},
+    model::*,
+};
 
 #[derive(Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EFile {
@@ -61,16 +68,38 @@ impl EFile {
     }
 
     pub fn from_str(value: &str) -> Self {
-        let value = value.to_lowercase().replace(".exe", "").replace(".dll", "");
+        // 定义常量来存储硬编码字符串
+        const CORE: &str = "easytier-core";
+        const CLI: &str = "easytier-cli";
+        #[cfg(windows)]
+        const PACKET: &str = "packet";
+        #[cfg(windows)]
+        const WINTUN: &str = "wintun";
 
-        if value == String::from("easytier-core") {
+        // 处理字符串，转换为小写并移除扩展名
+        let processed_value = value.to_lowercase().replace(".exe", "").replace(".dll", "");
+
+        // 检查空字符串和特殊字符
+        if processed_value.is_empty()
+            || !processed_value
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-')
+        {
+            return EFile::Other;
+        }
+
+        #[cfg(windows)]
+        if processed_value == PACKET {
+            return EFile::Packet;
+        } else if processed_value == WINTUN {
+            return EFile::Wintun;
+        }
+
+        // 处理其他条件
+        if processed_value == CORE {
             EFile::Core
-        } else if value == String::from("easytier-cli") {
+        } else if processed_value == CLI {
             EFile::Cli
-        } else if cfg!(target_os = "windows") && value == String::from("packet") {
-            EFile::Packet
-        } else if cfg!(target_os = "windows") && value == String::from("wintun") {
-            EFile::Wintun
         } else {
             EFile::Other
         }
@@ -79,7 +108,7 @@ impl EFile {
 
 pub fn unzip<P>(fname: P, need_file: Vec<EFile>) -> Result<()>
 where
-    P: AsRef<std::path::Path>,
+    P: AsRef<Path>,
 {
     let need_file = if need_file.len() == 0 {
         vec![EFile::All]
@@ -148,37 +177,73 @@ pub fn filter_release_with_platform(assets: Vec<GAsset>) -> Vec<GAsset> {
 }
 
 pub fn utf8_or_gbk_to_string(s: &[u8]) -> String {
-    if cfg!(target_os = "windows") {
-        use encoding::{all::GBK, DecoderTrap, Encoding};
-        if let Ok(utf8_str) = String::from_utf8(s.to_vec()) {
-            utf8_str
-        } else {
-            // 如果解码失败，则尝试使用GBK解码
-            if let Ok(gbk_str) = GBK.decode(&s, DecoderTrap::Strict) {
-                gbk_str
-            } else {
-                String::from_utf8_lossy(s).to_string()
-            }
+    #[cfg(windows)]
+    match try_utf8_or_gbk_decode(s) {
+        Ok(decoded) => decoded,
+        Err(_e) => String::from_utf8_lossy(s).to_string(),
+    }
+
+    #[cfg(not(windows))]
+    String::from_utf8_lossy(s).to_string()
+}
+
+#[cfg(windows)]
+fn try_utf8_or_gbk_decode(s: &[u8]) -> Result<String, String> {
+    use encoding::{all::GBK, DecoderTrap, Encoding};
+    match String::from_utf8(s.to_vec()) {
+        Ok(utf8_str) => Ok(utf8_str),
+        Err(_) => match GBK.decode(s, DecoderTrap::Replace) {
+            Ok(gbk_str) => Ok(gbk_str),
+            Err(e) => Err(format!("GBK decoding failed: {}", e)),
+        },
+    }
+}
+
+pub fn random_string(num: usize) -> String {
+    repeat_with(fastrand::alphanumeric)
+        .take(num)
+        .collect::<String>()
+}
+
+pub async fn get_auth_token() -> Result<Vec<String>> {
+    let mut tokens = BTreeSet::new();
+    read_tokens_from_file(&mut tokens).await?;
+
+    if tokens.len() == 0 {
+        tokens.insert(random_string(32));
+        set_auto_token(&mut tokens).await?;
+    }
+
+    Ok(tokens.into_iter().collect())
+}
+
+pub async fn read_tokens_from_file(tokens: &mut BTreeSet<String>) -> Result<()> {
+    let file = OpenOptions::new()
+        .read(true)
+        .open(constant::AUTH_FILE_NAME)
+        .await?;
+    let buf = BufReader::new(file);
+    let mut lines = buf.lines();
+    while let Some(line) = lines.next_line().await? {
+        if !line.is_empty() {
+            tokens.insert(line);
         }
-    } else {
-        String::from_utf8_lossy(s).to_string()
     }
+    Ok(())
 }
 
-pub fn generate_auth_token(num: usize) -> String {
-    let token: String = repeat_with(fastrand::alphanumeric).take(num).collect();
-    token
-}
+pub async fn set_auto_token(tokens: &mut BTreeSet<String>) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .open(constant::AUTH_FILE_NAME)
+        .await?;
 
-pub fn get_or_set_auth_token() -> Result<String> {
-    let path = Path::new("./.auth_token");
+    let content = tokens
+        .clone()
+        .into_iter()
+        .collect::<Vec<String>>()
+        .join("\n");
+    file.write_all(content.as_bytes()).await?;
 
-    if path.exists() {
-        let content = std::fs::read_to_string(path)?;
-        return Ok(content);
-    }
-
-    let token = generate_auth_token(32);
-    std::fs::write(path, &token)?;
-    Ok(token)
+    Ok(())
 }

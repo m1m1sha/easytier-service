@@ -4,7 +4,7 @@ use salvo::prelude::*;
 mod constant;
 mod easytier;
 mod error;
-mod handler;
+mod handlers;
 mod http;
 mod model;
 mod router;

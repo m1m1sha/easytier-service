@@ -1,10 +1,11 @@
 use std::{
     fs::{self, File},
     io::Write,
-    path,
+    path::Path,
 };
 
 use anyhow::Result;
+use reqwest::Url;
 
 use crate::{
     model::*,
@@ -31,19 +32,21 @@ pub async fn easytier_releases(filter_platform: bool) -> Result<Vec<GRelease>> {
     })
 }
 
-pub async fn download_file(url: &str, file_path: &str, need_file: Vec<EFile>) -> Result<()> {
-    let target = format!("https://ghp.ci/{}", url);
-    let response = reqwest::get(target).await?;
-    let path = path::Path::new(&file_path);
+pub async fn download_file<P>(url: &str, file_path: P, need_file: Vec<EFile>) -> Result<()>
+where
+    P: AsRef<Path>,
+{
+    let target = Url::parse(url).map_err(|e| anyhow::anyhow!("Invalid URL: {}", e))?;
 
-    let mut file = File::create(&path)?;
+    let response = reqwest::get(target).await?;
+    let mut file = File::create(&file_path)?;
 
     let content = response.bytes().await?;
 
     file.write_all(&content)?;
-    utils::unzip(path, need_file)?;
+    utils::unzip(&file_path, need_file)?;
 
-    match fs::remove_file(path) {
+    match fs::remove_file(&file_path) {
         Ok(_) => tracing::info!("delete zip file success"),
         Err(e) => tracing::warn!("delete zip file error: {}", e),
     }
